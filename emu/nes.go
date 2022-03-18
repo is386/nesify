@@ -26,10 +26,9 @@ type NES struct {
 
 func NewNES(romFileName string, debug bool) *NES {
 	nes := &NES{debug: debug}
-	mmu := mem.NewMMU()
+	mmu := nes.loadRom(romFileName)
 	nes.mmu = mmu
 	nes.cpu = cpu.NewCPU(mmu, debug)
-	nes.loadRom(romFileName)
 	return nes
 }
 
@@ -45,16 +44,13 @@ func (nes *NES) Run() {
 	}
 }
 
-func (nes *NES) loadRom(romFileName string) {
+func (nes *NES) loadRom(romFileName string) *mem.MMU {
 	rom, err := ioutil.ReadFile(romFileName)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(0)
 	}
-	for i := 0x10; i < 0x400F; i++ {
-		addr := uint16(0xC000 + i - 0x10)
-		nes.mmu.Write(addr, rom[i])
-	}
+	return mem.NewMMU(rom)
 }
 
 func (nes *NES) update() {
