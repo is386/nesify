@@ -10,7 +10,7 @@ import (
 )
 
 func parseArgs() bool {
-	parser := argparse.NewParser("GameFella", "A simple GameBoy emulator written in Go.")
+	parser := argparse.NewParser("NESify", "A simple NES emulator written in Go.")
 
 	debugFlag := parser.Flag("d", "debug",
 		&argparse.Options{
