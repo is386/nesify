@@ -2,7 +2,6 @@ package cpu
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/is386/NESify/emu/bits"
 	"github.com/is386/NESify/emu/mem"
@@ -185,7 +184,7 @@ func (c *CPU) pop16() uint16 {
 
 func illegal(c *CPU, operand uint16) {
 	fmt.Printf("illegal: %02X", c.read(uint16(c.pc-1)))
-	os.Exit(0)
+
 }
 
 func adc(c *CPU, operand uint16) {
