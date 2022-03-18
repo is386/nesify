@@ -289,8 +289,9 @@ func bpl(c *CPU, operand uint16) {
 }
 
 func brk(c *CPU, operand uint16) {
-	fmt.Println("BRK not implemented")
-	os.Exit(0)
+	c.push16(c.pc + 1)
+	c.p.setInterrupt()
+	c.push8(c.p.getStatus())
 }
 
 func bvc(c *CPU, operand uint16) {
