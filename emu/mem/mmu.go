@@ -7,8 +7,9 @@ type MMU struct {
 	cart Cart
 }
 
-func NewMMU(rom []uint8) *MMU {
-	return &MMU{cart: newCart(rom)}
+func NewMMU(rom []uint8) (*MMU, []uint8) {
+	c := newCart(rom)
+	return &MMU{cart: c}, c.getChr()
 }
 
 func (mmu *MMU) Read(addr uint16) uint8 {

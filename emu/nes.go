@@ -8,6 +8,7 @@ import (
 
 	"github.com/is386/NESify/emu/cpu"
 	"github.com/is386/NESify/emu/mem"
+	"github.com/is386/NESify/emu/ppu"
 )
 
 const (
@@ -20,15 +21,18 @@ const (
 type NES struct {
 	cpu            *cpu.CPU
 	mmu            *mem.MMU
+	ppu            *ppu.PPU
 	cyc            int
 	running, debug bool
 }
 
 func NewNES(romFileName string, debug bool) *NES {
 	nes := &NES{debug: debug}
-	mmu := nes.loadRom(romFileName)
+	rom := nes.loadRom(romFileName)
+	mmu, chr := mem.NewMMU(rom)
 	nes.mmu = mmu
 	nes.cpu = cpu.NewCPU(mmu, debug)
+	nes.ppu = ppu.NewPPU(chr)
 	return nes
 }
 
@@ -44,13 +48,13 @@ func (nes *NES) Run() {
 	}
 }
 
-func (nes *NES) loadRom(romFileName string) *mem.MMU {
+func (nes *NES) loadRom(romFileName string) []uint8 {
 	rom, err := ioutil.ReadFile(romFileName)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(0)
 	}
-	return mem.NewMMU(rom)
+	return rom
 }
 
 func (nes *NES) update() {

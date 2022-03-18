@@ -36,4 +36,5 @@ func main() {
 	}
 	n := emu.NewNES(romFileName, debug)
 	n.Run()
+
 }

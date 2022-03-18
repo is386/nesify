@@ -17,3 +17,7 @@ func (c *Cart) read(addr uint16) uint8 {
 func (c *Cart) write(addr uint16, val uint8) {
 	c.mapper.write(addr, val)
 }
+
+func (c *Cart) getChr() []uint8 {
+	return c.mapper.getChr()
+}
