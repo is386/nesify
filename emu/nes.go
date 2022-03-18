@@ -18,17 +18,17 @@ const (
 )
 
 type NES struct {
-	cpu     *cpu.CPU
-	mmu     *mem.MMU
-	cyc     int
-	running bool
+	cpu            *cpu.CPU
+	mmu            *mem.MMU
+	cyc            int
+	running, debug bool
 }
 
-func NewNES(romFileName string) *NES {
-	nes := &NES{}
+func NewNES(romFileName string, debug bool) *NES {
+	nes := &NES{debug: debug}
 	mmu := mem.NewMMU()
 	nes.mmu = mmu
-	nes.cpu = cpu.NewCPU(mmu)
+	nes.cpu = cpu.NewCPU(mmu, debug)
 	nes.loadRom(romFileName)
 	return nes
 }
@@ -51,8 +51,9 @@ func (nes *NES) loadRom(romFileName string) {
 		fmt.Println(err)
 		os.Exit(0)
 	}
-	for i := range rom {
-		nes.mmu.Write(uint16(i), rom[i])
+	for i := 0x10; i < 0x400F; i++ {
+		addr := uint16(0xC000 + i - 0x10)
+		nes.mmu.Write(addr, rom[i])
 	}
 }
 
