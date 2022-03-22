@@ -26,13 +26,13 @@ var (
 )
 
 type PPU struct {
-	cpu                                   *CPU
-	bus                                   *PpuBus
-	screen                                *Screen
-	reg                                   [9]uint8
-	scanline, cyc                         int
-	addr                                  uint16
-	nmiOccurred, nmiOutput, ppuAddrLoaded bool
+	cpu                                                              *CPU
+	bus                                                              *PpuBus
+	screen                                                           *Screen
+	scanline, cyc                                                    int
+	addr                                                             uint16
+	ppuCtrl, ppuMask, ppuStatus, oamAddr, oamData, ppuScroll, oamDma uint8
+	nmiOccurred, nmiOutput, ppuAddrLoaded                            bool
 }
 
 func NewPPU(b *PpuBus) *PPU {
@@ -44,10 +44,6 @@ func NewPPU(b *PpuBus) *PPU {
 }
 
 func (p *PPU) update() {
-	if p.nmiOutput && p.nmiOccurred {
-		p.cpu.interrupt = Nmi
-	}
-
 	p.cyc++
 	if p.cyc > 340 {
 		p.cyc -= 341
@@ -57,26 +53,23 @@ func (p *PPU) update() {
 	if p.scanline >= 0 && p.scanline <= 239 {
 		// drawing
 	} else if p.scanline == 241 && p.cyc == 1 {
-		stat := p.readRegister(PPUSTATUS)
-		stat = bits.Set(stat, 7)
-		p.writeRegister(PPUSTATUS, stat)
-		p.nmiOccurred = true
+		p.setVblank()
+		if p.nmiOutput && p.nmiOccurred {
+			p.cpu.triggerInterrupt(Nmi)
+		}
 		p.renderNameTables()
 	} else if p.scanline == 261 && p.cyc == 1 {
-		stat := p.readRegister(PPUSTATUS)
-		stat = bits.Reset(stat, 7)
-		p.writeRegister(PPUSTATUS, stat)
-		p.nmiOccurred = false
+		p.resetVblank()
 		p.scanline = 0
 	}
 }
 
 func (p *PPU) renderNameTables() {
-	ntAddr := uint16(0x2000)
+	ntAddr := p.getNameTableAddr()
 	baseX := 0
 	for ntByte := uint16(0); ntByte < 960; ntByte++ {
 		ptIdx := p.bus.read(ntAddr)
-		ptBaseAddr := 0x1000 + (uint16(ptIdx) * 16)
+		ptBaseAddr := p.getBgPatternTableAddr() + (uint16(ptIdx) * 16)
 
 		y := 0
 		for ptAddr := ptBaseAddr; ptAddr < ptBaseAddr+8; ptAddr++ {
@@ -103,16 +96,9 @@ func (p *PPU) showCHR() {
 	for y := 0; y < CHR_HEIGHT; y++ {
 		for x := 0; x < CHR_WIDTH; x++ {
 			addr := uint16((y / 8 * 0x100) + (y % 8) + (x/8)*0x10)
-
-			// Each row has 2 bytes, byte 1 = bit 0 of color num, byte 2 = bit 1 of color num
-			// Each bit pair represents the color for 1 pixel in the 8 pixel row
 			tileByte1 := p.bus.read(addr)
 			tileByte2 := p.bus.read(addr + 8)
-
-			// The pixel in the current row we want the color of
 			pixel := 7 - (x % 8)
-
-			// Color number 0-3 corresponding to the 4 colors of the palette
 			colorBit0 := (tileByte1 >> pixel) & 1
 			colorBit1 := (tileByte2 >> pixel) & 1
 			colorNum := (colorBit1 << 1) | colorBit0
@@ -126,10 +112,10 @@ func (p *PPU) readRegister(addr uint16) uint8 {
 	switch addr {
 
 	case PPUSTATUS:
-		return p.reg[2]
+		return p.ppuStatus
 
 	case OAMDATA:
-		return p.reg[4]
+		return p.oamData
 
 	case PPUDATA:
 		data := p.bus.read(p.addr)
@@ -146,22 +132,22 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 
 	case PPUCTRL:
 		p.nmiOutput = bits.Test(val, 7)
-		p.reg[0] = val
+		p.ppuCtrl = val
 
 	case PPUMASK:
-		p.reg[1] = val
+		p.ppuMask = val
 
 	case PPUSTATUS:
-		p.reg[2] = val
+		p.ppuStatus = val
 
 	case OAMADDR:
-		p.reg[3] = val
+		p.oamAddr = val
 
 	case OAMDATA:
-		p.reg[4] = val
+		p.oamData = val
 
 	case PPUSCROLL:
-		p.reg[5] = val
+		p.ppuScroll = val
 
 	case PPUADDR:
 		if p.ppuAddrLoaded {
@@ -170,23 +156,34 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 			p.addr = uint16(val)
 		}
 		p.ppuAddrLoaded = !p.ppuAddrLoaded
-		p.reg[6] = val
 
 	case PPUDATA:
 		p.bus.write(p.addr, val)
 		p.addr += p.getAddrIncrement()
-		p.reg[7] = val
 
 	case OAMDMA:
-		p.reg[8] = val
+		p.oamDma = val
 	}
 }
 
+func (p *PPU) getNameTableAddr() uint16 {
+	return 0x2000 + (0x400 * uint16(p.ppuCtrl&3))
+}
+
+func (p *PPU) getBgPatternTableAddr() uint16 {
+	return 0x1000 * uint16(bits.Value(p.ppuCtrl, 4))
+}
+
 func (p *PPU) getAddrIncrement() uint16 {
-	bit2 := bits.Value(p.reg[0], 2)
-	if bit2 == 0 {
-		return 1
-	} else {
-		return 32
-	}
+	return uint16(bits.Value(p.ppuCtrl, 2)*31) + 1
+}
+
+func (p *PPU) setVblank() {
+	p.ppuStatus = bits.Set(p.ppuStatus, 7)
+	p.nmiOccurred = true
+}
+
+func (p *PPU) resetVblank() {
+	p.ppuStatus = bits.Reset(p.ppuStatus, 7)
+	p.nmiOccurred = false
 }
