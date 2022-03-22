@@ -13,6 +13,41 @@ const (
 	NoInterrupt
 )
 
+var instructionNames = [256]string{
+	"BRK", "ORA", "KIL", "SLO", "NOP", "ORA", "ASL", "SLO",
+	"PHP", "ORA", "ASL", "ANC", "NOP", "ORA", "ASL", "SLO",
+	"BPL", "ORA", "KIL", "SLO", "NOP", "ORA", "ASL", "SLO",
+	"CLC", "ORA", "NOP", "SLO", "NOP", "ORA", "ASL", "SLO",
+	"JSR", "AND", "KIL", "RLA", "BIT", "AND", "ROL", "RLA",
+	"PLP", "AND", "ROL", "ANC", "BIT", "AND", "ROL", "RLA",
+	"BMI", "AND", "KIL", "RLA", "NOP", "AND", "ROL", "RLA",
+	"SEC", "AND", "NOP", "RLA", "NOP", "AND", "ROL", "RLA",
+	"RTI", "EOR", "KIL", "SRE", "NOP", "EOR", "LSR", "SRE",
+	"PHA", "EOR", "LSR", "ALR", "JMP", "EOR", "LSR", "SRE",
+	"BVC", "EOR", "KIL", "SRE", "NOP", "EOR", "LSR", "SRE",
+	"CLI", "EOR", "NOP", "SRE", "NOP", "EOR", "LSR", "SRE",
+	"RTS", "ADC", "KIL", "RRA", "NOP", "ADC", "ROR", "RRA",
+	"PLA", "ADC", "ROR", "ARR", "JMP", "ADC", "ROR", "RRA",
+	"BVS", "ADC", "KIL", "RRA", "NOP", "ADC", "ROR", "RRA",
+	"SEI", "ADC", "NOP", "RRA", "NOP", "ADC", "ROR", "RRA",
+	"NOP", "STA", "NOP", "SAX", "STY", "STA", "STX", "SAX",
+	"DEY", "NOP", "TXA", "XAA", "STY", "STA", "STX", "SAX",
+	"BCC", "STA", "KIL", "AHX", "STY", "STA", "STX", "SAX",
+	"TYA", "STA", "TXS", "TAS", "SHY", "STA", "SHX", "AHX",
+	"LDY", "LDA", "LDX", "LAX", "LDY", "LDA", "LDX", "LAX",
+	"TAY", "LDA", "TAX", "LAX", "LDY", "LDA", "LDX", "LAX",
+	"BCS", "LDA", "KIL", "LAX", "LDY", "LDA", "LDX", "LAX",
+	"CLV", "LDA", "TSX", "LAS", "LDY", "LDA", "LDX", "LAX",
+	"CPY", "CMP", "NOP", "DCP", "CPY", "CMP", "DEC", "DCP",
+	"INY", "CMP", "DEX", "AXS", "CPY", "CMP", "DEC", "DCP",
+	"BNE", "CMP", "KIL", "DCP", "NOP", "CMP", "DEC", "DCP",
+	"CLD", "CMP", "NOP", "DCP", "NOP", "CMP", "DEC", "DCP",
+	"CPX", "SBC", "NOP", "ISC", "CPX", "SBC", "INC", "ISC",
+	"INX", "SBC", "NOP", "SBC", "CPX", "SBC", "INC", "ISC",
+	"BEQ", "SBC", "KIL", "ISC", "NOP", "SBC", "INC", "ISC",
+	"SED", "SBC", "NOP", "ISC", "NOP", "SBC", "INC", "ISC",
+}
+
 type CPU struct {
 	cyc        int
 	a, x, y, s uint8
@@ -25,31 +60,20 @@ type CPU struct {
 }
 
 func NewCPU(bus *CpuBus, debug bool) *CPU {
-	pc := (uint16(bus.read(0xFFFC+1)) << 8) | uint16(bus.read(0xFFFC))
-	//pc = uint16(0xC000)
-	cpu := &CPU{
-		pc:        pc,
+	return &CPU{
+		pc:        (uint16(bus.read(0xFFFC+1)) << 8) | uint16(bus.read(0xFFFC)),
 		s:         0xFD,
 		p:         NewStatus(),
 		bus:       bus,
 		debug:     debug,
 		interrupt: NoInterrupt,
 	}
-	return cpu
 }
 
 func (c *CPU) update() int {
 	c.print()
 	c.cyc = 0
-
-	switch c.interrupt {
-	case Nmi:
-		brk(c, 0)
-		c.cyc += 7
-		c.pc = (uint16(c.read(0xFFFB)) << 8) | uint16(c.read(0xFFFA))
-	}
-	c.interrupt = NoInterrupt
-
+	c.checkInterrupts()
 	opcode := c.fetch()
 	c.instr = c.decode(opcode)
 	operand := c.getOperand(c.instr.addrMode)
@@ -60,8 +84,8 @@ func (c *CPU) update() int {
 
 func (c *CPU) print() {
 	if c.debug {
-		fmt.Printf("%04X %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X\n",
-			c.pc, c.read(c.pc), c.a, c.x, c.y, c.p.getStatus(), c.s)
+		fmt.Printf("%04X %s A:%02X X:%02X Y:%02X P:%02X SP:%02X\n",
+			c.pc, instructionNames[c.read(c.pc)], c.a, c.x, c.y, c.p.getStatus(), c.s)
 	}
 }
 
@@ -201,6 +225,22 @@ func (c *CPU) pop16() uint16 {
 	lo := uint16(c.pop8())
 	hi := uint16(c.pop8())
 	return (hi << 8) | lo
+}
+
+func (c *CPU) triggerInterrupt(i Interrupt) {
+	c.interrupt = i
+}
+
+func (c *CPU) checkInterrupts() {
+	switch c.interrupt {
+	case Nmi:
+		c.push16(c.pc)
+		php(c, 0)
+		c.pc = (uint16(c.read(0xFFFB)) << 8) | uint16(c.read(0xFFFA))
+		c.p.setInterrupt()
+		c.cyc += 7
+	}
+	c.interrupt = NoInterrupt
 }
 
 func illegal(c *CPU, operand uint16) {
