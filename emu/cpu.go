@@ -1,14 +1,16 @@
-package cpu
+package emu
 
 import (
 	"fmt"
 
 	"github.com/is386/NESify/emu/bits"
-	"github.com/is386/NESify/emu/mem"
 )
 
-var (
-	CYC = 7
+type Interrupt int
+
+const (
+	Nmi Interrupt = iota
+	NoInterrupt
 )
 
 type CPU struct {
@@ -17,46 +19,58 @@ type CPU struct {
 	pc         uint16
 	p          *Status
 	instr      Instruction
-	mmu        *mem.MMU
+	bus        *CpuBus
+	interrupt  Interrupt
 	debug      bool
 }
 
-func NewCPU(mmu *mem.MMU, debug bool) *CPU {
+func NewCPU(bus *CpuBus, debug bool) *CPU {
+	pc := (uint16(bus.read(0xFFFC+1)) << 8) | uint16(bus.read(0xFFFC))
+	//pc = uint16(0xC000)
 	cpu := &CPU{
-		s:     0xFD,
-		pc:    0xC000,
-		p:     NewStatus(),
-		mmu:   mmu,
-		debug: debug,
+		pc:        pc,
+		s:         0xFD,
+		p:         NewStatus(),
+		bus:       bus,
+		debug:     debug,
+		interrupt: NoInterrupt,
 	}
 	return cpu
 }
 
-func (c *CPU) Update() int {
+func (c *CPU) update() int {
 	c.print()
 	c.cyc = 0
+
+	switch c.interrupt {
+	case Nmi:
+		brk(c, 0)
+		c.cyc += 7
+		c.pc = (uint16(c.read(0xFFFB)) << 8) | uint16(c.read(0xFFFA))
+	}
+	c.interrupt = NoInterrupt
+
 	opcode := c.fetch()
 	c.instr = c.decode(opcode)
 	operand := c.getOperand(c.instr.addrMode)
 	c.instr.function(c, operand)
 	c.cyc += c.instr.cyc
-	CYC += c.cyc
 	return c.cyc
 }
 
 func (c *CPU) print() {
 	if c.debug {
-		fmt.Printf("%04X %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%d\n",
-			c.pc, c.read(c.pc), c.a, c.x, c.y, c.p.getStatus(), c.s, CYC)
+		fmt.Printf("%04X %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X\n",
+			c.pc, c.read(c.pc), c.a, c.x, c.y, c.p.getStatus(), c.s)
 	}
 }
 
 func (c *CPU) read(addr uint16) uint8 {
-	return c.mmu.Read(addr)
+	return c.bus.read(addr)
 }
 
 func (c *CPU) write(addr uint16, val uint8) {
-	c.mmu.Write(addr, val)
+	c.bus.write(addr, val)
 }
 
 func (c *CPU) nextByte() uint8 {
@@ -135,7 +149,14 @@ func (c *CPU) getOperand(addrMode AddrMode) uint16 {
 		return addr
 
 	case Rel:
-		return uint16(c.nextByte())
+		offset := uint16(c.nextByte())
+		var addr uint16
+		if offset < 0x80 {
+			addr = c.pc + offset
+		} else {
+			addr = c.pc + offset - 0x100
+		}
+		return addr
 
 	case Zp:
 		return uint16(c.nextByte()) % 256
@@ -183,8 +204,10 @@ func (c *CPU) pop16() uint16 {
 }
 
 func illegal(c *CPU, operand uint16) {
-	fmt.Printf("illegal: %02X", c.read(uint16(c.pc-1)))
-
+	if c.debug {
+		for {
+		}
+	}
 }
 
 func adc(c *CPU, operand uint16) {
@@ -230,21 +253,21 @@ func asl(c *CPU, operand uint16) {
 
 func bcc(c *CPU, operand uint16) {
 	if c.p.getCarry() == 0 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
 
 func bcs(c *CPU, operand uint16) {
 	if c.p.getCarry() == 1 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
 
 func beq(c *CPU, operand uint16) {
 	if c.p.getZero() == 1 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
@@ -268,21 +291,21 @@ func bit(c *CPU, operand uint16) {
 
 func bne(c *CPU, operand uint16) {
 	if c.p.getZero() == 0 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
 
 func bmi(c *CPU, operand uint16) {
 	if c.p.getNegative() == 1 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
 
 func bpl(c *CPU, operand uint16) {
 	if c.p.getNegative() == 0 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
@@ -295,14 +318,14 @@ func brk(c *CPU, operand uint16) {
 
 func bvc(c *CPU, operand uint16) {
 	if c.p.getOverflow() == 0 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
 
 func bvs(c *CPU, operand uint16) {
 	if c.p.getOverflow() == 1 {
-		c.pc += operand
+		c.pc = operand
 		c.cyc++
 	}
 }
@@ -532,7 +555,7 @@ func ror(c *CPU, operand uint16) {
 }
 
 func rti(c *CPU, operand uint16) {
-	plp(c, operand)
+	c.p.setStatus(c.pop8()&0xEF | 0x20)
 	c.pc = c.pop16()
 }
 
