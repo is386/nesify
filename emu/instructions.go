@@ -1,4 +1,4 @@
-package cpu
+package emu
 
 type AddrMode int
 

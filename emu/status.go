@@ -1,4 +1,4 @@
-package cpu
+package emu
 
 import "github.com/is386/NESify/emu/bits"
 

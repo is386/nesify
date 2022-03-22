@@ -1,4 +1,4 @@
-package ppu
+package emu
 
 import (
 	"github.com/veandco/go-sdl2/sdl"
@@ -30,7 +30,6 @@ func NewScreen(width, height, scale int) *Screen {
 		panic(err)
 	}
 
-	sur.FillRect(nil, 0xF0F0F0)
 	win.UpdateSurface()
 
 	s := Screen{scale: scale, win: win, sur: sur}
