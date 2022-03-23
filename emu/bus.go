@@ -70,11 +70,8 @@ func (bus *PpuBus) read(addr uint16) uint8 {
 	case addr < 0x2000:
 		return bus.cart.read(addr)
 
-	case addr < 0x3F00:
-		return bus.vram[addr]
-
 	case addr < 0x4000:
-		return 0
+		return bus.vram[addr]
 
 	default:
 		return 0
@@ -87,10 +84,7 @@ func (bus *PpuBus) write(addr uint16, val uint8) {
 	case addr < 0x2000:
 		bus.cart.write(addr, val)
 
-	case addr < 0x3F00:
-		bus.vram[addr] = val
-
 	case addr < 0x4000:
-		return
+		bus.vram[addr] = val
 	}
 }
