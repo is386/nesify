@@ -4,6 +4,12 @@ import (
 	"github.com/is386/NESify/emu/bits"
 )
 
+// TODO:
+// - Sprite overlap priority
+// - 8x16 sprites
+// - Scrolling
+// - NameTable mirroring
+
 const (
 	NES_WIDTH  = 256
 	NES_HEIGHT = 240
@@ -35,21 +41,20 @@ var (
 )
 
 type PPU struct {
-	cpu                                                              *CPU
-	bus                                                              *PpuBus
-	screen                                                           *Screen
-	scanline, cyc                                                    int
-	addr                                                             uint16
-	ppuCtrl, ppuMask, ppuStatus, oamAddr, oamData, ppuScroll, oamDma uint8
-	nmiOccurred, nmiOutput, ppuAddrLoaded                            bool
+	cpu                                             *CPU
+	bus                                             *PpuBus
+	screen                                          *Screen
+	bgPixels                                        [NES_WIDTH][NES_HEIGHT]uint8
+	scanline, cyc                                   int
+	addr                                            uint16
+	ppuCtrl, ppuMask, ppuStatus, oamAddr, ppuScroll uint8
+	nmiOccurred, nmiOutput, ppuAddrLoaded           bool
 }
 
 func NewPPU(b *PpuBus) *PPU {
 	p := &PPU{bus: b}
-	//p.screen = NewScreen(NES_WIDTH+CHR_WIDTH, CHR_HEIGHT, SCALE)
 	p.screen = NewScreen(NES_WIDTH, NES_HEIGHT, SCALE)
 	p.screen.win.SetTitle("NESify")
-	//p.showCHR()
 	return p
 }
 
@@ -67,14 +72,17 @@ func (p *PPU) update() {
 		if p.nmiOutput && p.nmiOccurred {
 			p.cpu.triggerInterrupt(Nmi)
 		}
-		p.renderNameTables()
+		p.renderBackground()
+		p.renderSprites()
 	} else if p.scanline == 261 && p.cyc == 1 {
 		p.resetVblank()
 		p.scanline = 0
+		p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
+		p.screen.Update()
 	}
 }
 
-func (p *PPU) renderNameTables() {
+func (p *PPU) renderBackground() {
 	ntAddr := p.getNameTableAddr()
 	baseX := 0
 	for ntByte := uint16(0); ntByte < 960; ntByte++ {
@@ -91,6 +99,7 @@ func (p *PPU) renderNameTables() {
 				colorBit0 := (ptByte1 >> pixel) & 1
 				colorBit1 := (ptByte2 >> pixel) & 1
 				colorNum := (colorBit1 << 1) | colorBit0
+				p.bgPixels[x][y] = colorNum
 
 				blockX := x / 32
 				blockY := y / 32
@@ -110,7 +119,58 @@ func (p *PPU) renderNameTables() {
 		}
 		baseX = (baseX + 8) % NES_WIDTH
 	}
-	p.screen.Update()
+}
+
+func (p *PPU) renderSprites() {
+	for oamAddr := 0; oamAddr < 256; oamAddr += 4 {
+		spriteY := int(p.bus.readOam(uint8(oamAddr)))
+		spriteX := int(p.bus.readOam(uint8(oamAddr) + 3))
+
+		attrs := p.bus.readOam(uint8(oamAddr) + 2)
+		paletteNum := (attrs & 3) + 4
+		bgPriority := bits.Test(attrs, 5)
+		xFlip := bits.Test(attrs, 6)
+		yFlip := bits.Test(attrs, 7)
+
+		tileIdx := p.bus.readOam(uint8(oamAddr) + 1)
+		ptBaseAddr := p.getSpritePatternTableAddr() + (uint16(tileIdx) * 16)
+
+		for ptAddr := ptBaseAddr; ptAddr < ptBaseAddr+8; ptAddr++ {
+			if spriteY >= NES_HEIGHT {
+				break
+			}
+
+			y := spriteY
+			if yFlip {
+				y = 8 - spriteY - 1
+			}
+
+			ptByte1 := p.bus.read(ptAddr)
+			ptByte2 := p.bus.read(ptAddr + 8)
+			diff := (8 - (spriteX % 8))
+
+			for x := spriteX; x < spriteX+8; x++ {
+				if x >= NES_WIDTH {
+					break
+				}
+
+				pixel := 7 - ((x + diff) % 8)
+				if xFlip {
+					pixel = 7 - pixel
+				}
+				colorBit0 := (ptByte1 >> pixel) & 1
+				colorBit1 := (ptByte2 >> pixel) & 1
+				colorNum := (colorBit1 << 1) | colorBit0
+
+				if colorNum == 0 || (bgPriority && p.bgPixels[x][spriteY] != 0) {
+					continue
+				}
+
+				p.screen.drawPixel(int32(x), int32(y), p.getPalette(int(paletteNum))[colorNum])
+			}
+			spriteY++
+		}
+	}
 }
 
 func (p *PPU) showCHR() {
@@ -136,7 +196,11 @@ func (p *PPU) readRegister(addr uint16) uint8 {
 		return p.ppuStatus
 
 	case OAMDATA:
-		return p.oamData
+		data := p.bus.readOam(p.oamAddr)
+		if (p.oamAddr & 3) == 2 {
+			data &= 0xE3
+		}
+		return data
 
 	case PPUDATA:
 		data := p.bus.read(p.addr)
@@ -165,7 +229,8 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 		p.oamAddr = val
 
 	case OAMDATA:
-		p.oamData = val
+		p.bus.writeOam(p.oamAddr, val)
+		p.oamAddr++
 
 	case PPUSCROLL:
 		p.ppuScroll = val
@@ -183,7 +248,11 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 		p.addr += p.getAddrIncrement()
 
 	case OAMDMA:
-		p.oamDma = val
+		cpuAddr := uint16(val) << 8
+		for i := uint16(0); i < 256; i++ {
+			p.bus.writeOam(p.oamAddr, p.cpu.read(cpuAddr+i))
+			p.oamAddr++
+		}
 	}
 }
 
@@ -193,6 +262,10 @@ func (p *PPU) getNameTableAddr() uint16 {
 
 func (p *PPU) getBgPatternTableAddr() uint16 {
 	return 0x1000 * uint16(bits.Value(p.ppuCtrl, 4))
+}
+
+func (p *PPU) getSpritePatternTableAddr() uint16 {
+	return 0x1000 * uint16(bits.Value(p.ppuCtrl, 3))
 }
 
 func (p *PPU) getAddrIncrement() uint16 {
