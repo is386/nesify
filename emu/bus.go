@@ -56,6 +56,7 @@ func (bus *CpuBus) write(addr uint16, val uint8) {
 
 type PpuBus struct {
 	vram [0x8000]uint8
+	oam  [0x0100]uint8
 	cart *Cart
 }
 
@@ -87,4 +88,12 @@ func (bus *PpuBus) write(addr uint16, val uint8) {
 	case addr < 0x4000:
 		bus.vram[addr] = val
 	}
+}
+
+func (bus *PpuBus) readOam(addr uint8) uint8 {
+	return bus.oam[addr]
+}
+
+func (bus *PpuBus) writeOam(addr uint8, val uint8) {
+	bus.oam[addr] = val
 }

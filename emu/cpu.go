@@ -57,6 +57,7 @@ type CPU struct {
 	bus        *CpuBus
 	interrupt  Interrupt
 	debug      bool
+	stall      int
 }
 
 func NewCPU(bus *CpuBus, debug bool) *CPU {
