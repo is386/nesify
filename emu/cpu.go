@@ -2,6 +2,7 @@ package emu
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/is386/NESify/emu/bits"
 )
@@ -57,7 +58,6 @@ type CPU struct {
 	bus        *CpuBus
 	interrupt  Interrupt
 	debug      bool
-	stall      int
 }
 
 func NewCPU(bus *CpuBus, debug bool) *CPU {
@@ -246,8 +246,7 @@ func (c *CPU) checkInterrupts() {
 
 func illegal(c *CPU, operand uint16) {
 	if c.debug {
-		for {
-		}
+		os.Exit(0)
 	}
 }
 

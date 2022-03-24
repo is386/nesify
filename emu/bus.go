@@ -1,13 +1,14 @@
 package emu
 
 type CpuBus struct {
-	ram  [0x800]uint8
-	cart *Cart
-	ppu  *PPU
+	ram         [0x800]uint8
+	cart        *Cart
+	ppu         *PPU
+	controllers *Controllers
 }
 
-func NewCpuBus(c *Cart, ppu *PPU) *CpuBus {
-	b := &CpuBus{cart: c, ppu: ppu}
+func NewCpuBus(c *Cart, ppu *PPU, controllers *Controllers) *CpuBus {
+	b := &CpuBus{cart: c, ppu: ppu, controllers: controllers}
 	return b
 }
 
@@ -20,8 +21,8 @@ func (bus *CpuBus) read(addr uint16) uint8 {
 	case addr < 0x4000 || addr == 0x4014:
 		return bus.ppu.readRegister(addr)
 
-	case addr < 0x4018:
-		return 0
+	case addr == 0x4016:
+		return bus.controllers.readController1()
 
 	case addr < 0x4020:
 		return 0
@@ -43,8 +44,8 @@ func (bus *CpuBus) write(addr uint16, val uint8) {
 	case addr < 0x4000 || addr == 0x4014:
 		bus.ppu.writeRegister(addr, val)
 
-	case addr < 0x4018:
-		return
+	case addr == 0x4016:
+		bus.controllers.enablePolling(val)
 
 	case addr < 0x4020:
 		return
