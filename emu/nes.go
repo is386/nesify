@@ -17,6 +17,7 @@ const (
 type NES struct {
 	cpu            *CPU
 	ppu            *PPU
+	controllers    *Controllers
 	cyc            int
 	running, debug bool
 }
@@ -25,8 +26,9 @@ func NewNES(romFileName string, debug bool) *NES {
 	nes := &NES{debug: debug}
 	rom := nes.loadRom(romFileName)
 	cart := NewCart(rom)
+	nes.controllers = NewControllers()
 	nes.ppu = NewPPU(NewPpuBus(cart))
-	nes.cpu = NewCPU(NewCpuBus(cart, nes.ppu), debug)
+	nes.cpu = NewCPU(NewCpuBus(cart, nes.ppu, nes.controllers), debug)
 	nes.ppu.cpu = nes.cpu
 	return nes
 }
@@ -61,6 +63,7 @@ func (nes *NES) update() {
 			nes.ppu.update()
 		}
 	}
+	nes.controllers.update()
 	nes.cyc -= CPS
 }
 
