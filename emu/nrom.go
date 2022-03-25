@@ -1,8 +1,9 @@
 package emu
 
 type NROM struct {
-	rom [0x4000]uint8
-	chr [0x4000]uint8
+	rom  [0x8000]uint8
+	chr  [0x4000]uint8
+	size int
 }
 
 func newNROM() Mapper {
@@ -10,11 +11,15 @@ func newNROM() Mapper {
 }
 
 func (n *NROM) loadRom(rom []uint8) {
-	for i := uint16(0); i < 0x4000; i++ {
+	n.size = len(rom)
+	end := uint16(len(rom) - 0x2010)
+	for i := uint16(0); i < end; i++ {
 		n.rom[i] = rom[i+0x10]
 	}
-	for i := uint16(0x4010); i < 0x6010; i++ {
-		n.chr[i-0x4010] = rom[i]
+	start := uint16(len(rom) - 0x2000)
+	end = uint16(len(rom))
+	for i := start; i < end; i++ {
+		n.chr[i-start] = rom[i]
 	}
 }
 
@@ -24,7 +29,11 @@ func (n *NROM) read(addr uint16) uint8 {
 	} else if addr >= 0x8000 && addr <= 0xBFFF {
 		return n.rom[addr-0x8000]
 	} else if addr >= 0xC000 && addr <= 0xFFFF {
-		return n.rom[addr-0xC000]
+		if n.size == 0xA010 {
+			return n.rom[addr-0x8000]
+		} else {
+			return n.rom[addr-0xC000]
+		}
 	}
 	return 0
 }
@@ -35,6 +44,10 @@ func (n *NROM) write(addr uint16, val uint8) {
 	} else if addr >= 0x8000 && addr <= 0xBFFF {
 		n.rom[addr-0x8000] = val
 	} else if addr >= 0xC000 && addr <= 0xFFFF {
-		n.rom[addr-0xC000] = val
+		if n.size == 0xA010 {
+			n.rom[addr-0x8000] = val
+		} else {
+			n.rom[addr-0xC000] = val
+		}
 	}
 }

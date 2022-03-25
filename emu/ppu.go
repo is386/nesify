@@ -9,6 +9,7 @@ import (
 // - 8x16 sprites
 // - Scrolling
 // - NameTable mirroring
+// - CPU stalling after DMA
 
 const (
 	NES_WIDTH  = 256
@@ -41,14 +42,14 @@ var (
 )
 
 type PPU struct {
-	cpu                                             *CPU
-	bus                                             *PpuBus
-	screen                                          *Screen
-	bgPixels                                        [NES_WIDTH][NES_HEIGHT]uint8
-	scanline, cyc                                   int
-	addr                                            uint16
-	ppuCtrl, ppuMask, ppuStatus, oamAddr, ppuScroll uint8
-	nmiOccurred, nmiOutput, ppuAddrLoaded           bool
+	cpu                                                         *CPU
+	bus                                                         *PpuBus
+	screen                                                      *Screen
+	bgPixels                                                    [NES_WIDTH][NES_HEIGHT]uint8
+	scanline, cyc                                               int
+	addr                                                        uint16
+	ppuCtrl, ppuMask, ppuStatus, oamAddr, ppuScroll, dataBuffer uint8
+	nmiOccurred, nmiOutput, ppuAddrLoaded                       bool
 }
 
 func NewPPU(b *PpuBus) *PPU {
@@ -78,7 +79,6 @@ func (p *PPU) update() {
 		p.resetVblank()
 		p.scanline = 0
 		p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
-		p.screen.Update()
 	}
 }
 
@@ -113,8 +113,8 @@ func (p *PPU) renderBackground() {
 				paletteBit0 := bits.Value(blockByte, (quad * 2))
 				paletteBit1 := bits.Value(blockByte, (quad*2)+1)
 				paletteNum := (paletteBit1 << 1) | paletteBit0
-
-				p.screen.drawPixel(int32(x), int32(y), p.getPalette(int(paletteNum))[colorNum])
+				color := p.getPalette(int(paletteNum))[colorNum]
+				p.screen.drawPixel(int32(x), int32(y), color)
 			}
 		}
 		baseX = (baseX + 8) % NES_WIDTH
@@ -166,7 +166,8 @@ func (p *PPU) renderSprites() {
 					continue
 				}
 
-				p.screen.drawPixel(int32(x), int32(y), p.getPalette(int(paletteNum))[colorNum])
+				color := p.getPalette(int(paletteNum))[colorNum]
+				p.screen.drawPixel(int32(x), int32(y), color)
 			}
 			spriteY++
 		}
@@ -204,6 +205,9 @@ func (p *PPU) readRegister(addr uint16) uint8 {
 
 	case PPUDATA:
 		data := p.bus.read(p.addr)
+		if p.addr < 0x3F00 {
+			data, p.dataBuffer = p.dataBuffer, data
+		}
 		p.addr += p.getAddrIncrement()
 		return data
 
@@ -282,12 +286,12 @@ func (p *PPU) resetVblank() {
 	p.nmiOccurred = false
 }
 
-func (p *PPU) getPalette(num int) []uint32 {
+func (p *PPU) getPalette(num int) [4]uint32 {
+	palette := [4]uint32{COLORS[p.bus.read(uint16(0x3F00))]}
 	addr := 0x3F00 + (num * 4)
-	var palette []uint32
-	for i := addr; i < addr+4; i++ {
+	for i := addr + 1; i < addr+4; i++ {
 		paletteByte := p.bus.read(uint16(i))
-		palette = append(palette, COLORS[paletteByte])
+		palette[i-addr] = COLORS[paletteByte]
 	}
 	return palette
 }

@@ -72,6 +72,9 @@ func (bus *PpuBus) read(addr uint16) uint8 {
 	case addr < 0x2000:
 		return bus.cart.read(addr)
 
+	case addr >= 0x3F00 && addr <= 0x3F1F:
+		return bus.vram[bus.mirrorPalette(addr)]
+
 	case addr < 0x4000:
 		return bus.vram[addr]
 
@@ -86,6 +89,9 @@ func (bus *PpuBus) write(addr uint16, val uint8) {
 	case addr < 0x2000:
 		bus.cart.write(addr, val)
 
+	case addr >= 0x3F00 && addr <= 0x3F1F:
+		bus.vram[bus.mirrorPalette(addr)] = val
+
 	case addr < 0x4000:
 		bus.vram[addr] = val
 	}
@@ -97,4 +103,19 @@ func (bus *PpuBus) readOam(addr uint8) uint8 {
 
 func (bus *PpuBus) writeOam(addr uint8, val uint8) {
 	bus.oam[addr] = val
+}
+
+func (bus *PpuBus) mirrorPalette(addr uint16) uint16 {
+	switch addr {
+	case 0x3F10:
+		return 0x3F00
+	case 0x3F14:
+		return 0x3F04
+	case 0x3F18:
+		return 0x3F08
+	case 0x3F1C:
+		return 0x3F0C
+	default:
+		return addr
+	}
 }

@@ -57,12 +57,12 @@ func (nes *NES) loadRom(romFileName string) []uint8 {
 func (nes *NES) update() {
 	for nes.cyc < CPS {
 		cpuCyc := nes.cpu.update()
-		ppuCyc := cpuCyc * 3
 		nes.cyc += cpuCyc
-		for i := 0; i < ppuCyc; i++ {
+		for i := 0; i < cpuCyc*3; i++ {
 			nes.ppu.update()
 		}
 	}
+	nes.ppu.screen.Update()
 	nes.controllers.update()
 	nes.cyc -= CPS
 }

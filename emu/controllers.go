@@ -1,6 +1,8 @@
 package emu
 
 import (
+	"os"
+
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -17,9 +19,21 @@ const (
 	Right
 )
 
+var (
+	buttonMap = map[sdl.Keycode]Button{
+		sdl.K_RETURN: Start,
+		sdl.K_RSHIFT: Select,
+		sdl.K_w:      Up,
+		sdl.K_s:      Down,
+		sdl.K_a:      Left,
+		sdl.K_d:      Right,
+		sdl.K_j:      A,
+		sdl.K_k:      B,
+	}
+)
+
 type Controllers struct {
-	buttons1  [8]Button
-	buttons2  [8]Button
+	buttons   [8]Button
 	pollInput int
 }
 
@@ -30,6 +44,8 @@ func NewControllers() *Controllers {
 func (c *Controllers) update() {
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		switch e := event.(type) {
+		case *sdl.QuitEvent:
+			os.Exit(0)
 		case *sdl.KeyboardEvent:
 			switch e.Type {
 			case sdl.KEYDOWN:
@@ -42,50 +58,16 @@ func (c *Controllers) update() {
 }
 
 func (c *Controllers) keyDown(key sdl.Keycode) {
-	switch key {
-	case sdl.K_RETURN:
-		c.buttons1[Start] = 1
-	case sdl.K_RSHIFT:
-		c.buttons1[Select] = 1
-	case sdl.K_w:
-		c.buttons1[Up] = 1
-	case sdl.K_s:
-		c.buttons1[Down] = 1
-	case sdl.K_a:
-		c.buttons1[Left] = 1
-	case sdl.K_d:
-		c.buttons1[Right] = 1
-	case sdl.K_j:
-		c.buttons1[A] = 1
-	case sdl.K_k:
-		c.buttons1[B] = 1
-	}
+	c.buttons[buttonMap[key]] = 1
 }
 
 func (c *Controllers) keyUp(key sdl.Keycode) {
-	switch key {
-	case sdl.K_RETURN:
-		c.buttons1[Start] = 0
-	case sdl.K_RSHIFT:
-		c.buttons1[Select] = 0
-	case sdl.K_w:
-		c.buttons1[Up] = 0
-	case sdl.K_s:
-		c.buttons1[Down] = 0
-	case sdl.K_a:
-		c.buttons1[Left] = 0
-	case sdl.K_d:
-		c.buttons1[Right] = 0
-	case sdl.K_j:
-		c.buttons1[A] = 0
-	case sdl.K_k:
-		c.buttons1[B] = 0
-	}
+	c.buttons[buttonMap[key]] = 0
 }
 
 func (c *Controllers) readController1() uint8 {
 	if c.pollInput >= 0 {
-		val := uint8(c.buttons1[c.pollInput])
+		val := uint8(c.buttons[c.pollInput])
 		c.pollInput++
 		if c.pollInput > 7 {
 			c.pollInput = -1
@@ -96,5 +78,7 @@ func (c *Controllers) readController1() uint8 {
 }
 
 func (c *Controllers) enablePolling(val uint8) {
-	c.pollInput = int(val)
+	if val != 0 {
+		c.pollInput = 0
+	}
 }
