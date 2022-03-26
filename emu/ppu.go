@@ -67,64 +67,72 @@ func (p *PPU) update() {
 	}
 
 	if p.scanline >= 0 && p.scanline <= 239 {
-		// drawing
+		if p.cyc == 230 {
+			p.renderBackground()
+			p.renderSprites()
+		}
 	} else if p.scanline == 241 && p.cyc == 1 {
 		p.setVblank()
 		if p.nmiOutput && p.nmiOccurred {
 			p.cpu.triggerInterrupt(Nmi)
 		}
-		p.renderBackground()
-		p.renderSprites()
 	} else if p.scanline == 261 && p.cyc == 1 {
 		p.resetVblank()
 		p.scanline = 0
 		p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
+		p.resetZeroHit()
 	}
 }
 
 func (p *PPU) renderBackground() {
-	ntAddr := p.getNameTableAddr()
-	baseX := 0
-	for ntByte := uint16(0); ntByte < 960; ntByte++ {
-		ptIdx := p.bus.read(ntAddr + ntByte)
-		ptBaseAddr := p.getBgPatternTableAddr() + (uint16(ptIdx) * 16)
+	ntBaseAddr := p.getNameTableAddr()
 
-		for ptAddr := ptBaseAddr; ptAddr < ptBaseAddr+8; ptAddr++ {
-			ptByte1 := p.bus.read(ptAddr)
-			ptByte2 := p.bus.read(ptAddr + 8)
-			y := int(ptAddr-ptBaseAddr) + int(ntByte/32)*8
+	for x := 0; x < NES_WIDTH; x++ {
+		ntX := x / 8
+		ntY := p.scanline / 8
+		ntAddr := uint16((ntY*32)+ntX) + uint16(ntBaseAddr)
 
-			for x := baseX; x < baseX+8; x++ {
-				pixel := 7 - (x % 8)
-				colorBit0 := (ptByte1 >> pixel) & 1
-				colorBit1 := (ptByte2 >> pixel) & 1
-				colorNum := (colorBit1 << 1) | colorBit0
-				p.bgPixels[x][y] = colorNum
+		ptIdx := p.bus.read(ntAddr)
+		ptAddr := p.getBgPatternTableAddr() + (uint16(ptIdx) * 16) + uint16(p.scanline%8)
+		ptByte1 := p.bus.read(ptAddr)
+		ptByte2 := p.bus.read(ptAddr + 8)
 
-				blockX := x / 32
-				blockY := y / 32
-				blockAddr := uint16(8*blockY) + uint16(blockX) + ntAddr + 0x3C0
-				blockByte := p.bus.read(blockAddr)
+		pixel := 7 - (x % 8)
+		colorBit0 := (ptByte1 >> pixel) & 1
+		colorBit1 := (ptByte2 >> pixel) & 1
+		colorNum := (colorBit1 << 1) | colorBit0
+		p.bgPixels[x][p.scanline] = colorNum
 
-				quadX := x / 16
-				quadY := y / 16
-				quad := uint8(((quadY % 2) << 1) | (quadX % 2))
+		blockX := x / 32
+		blockY := p.scanline / 32
+		blockAddr := uint16(8*blockY) + uint16(blockX) + ntBaseAddr + 0x3C0
+		blockByte := p.bus.read(blockAddr)
 
-				paletteBit0 := bits.Value(blockByte, (quad * 2))
-				paletteBit1 := bits.Value(blockByte, (quad*2)+1)
-				paletteNum := (paletteBit1 << 1) | paletteBit0
-				color := p.getPalette(int(paletteNum))[colorNum]
-				p.screen.drawPixel(int32(x), int32(y), color)
-			}
-		}
-		baseX = (baseX + 8) % NES_WIDTH
+		quadX := x / 16
+		quadY := p.scanline / 16
+		quad := uint8(((quadY % 2) << 1) | (quadX % 2))
+
+		paletteBit0 := bits.Value(blockByte, (quad * 2))
+		paletteBit1 := bits.Value(blockByte, (quad*2)+1)
+		paletteNum := (paletteBit1 << 1) | paletteBit0
+		color := p.getPalette(int(paletteNum))[colorNum]
+		p.screen.drawPixel(int32(x), int32(p.scanline), color)
 	}
 }
 
 func (p *PPU) renderSprites() {
 	for oamAddr := 0; oamAddr < 256; oamAddr += 4 {
+		spriteHeight := 8
 		spriteY := int(p.bus.readOam(uint8(oamAddr)))
 		spriteX := int(p.bus.readOam(uint8(oamAddr) + 3))
+
+		if p.scanline < spriteY || p.scanline >= (spriteY+spriteHeight) {
+			continue
+		}
+
+		if oamAddr == 0 && spriteX < 255 {
+			p.setZeroHit()
+		}
 
 		attrs := p.bus.readOam(uint8(oamAddr) + 2)
 		paletteNum := (attrs & 3) + 4
@@ -132,44 +140,36 @@ func (p *PPU) renderSprites() {
 		xFlip := bits.Test(attrs, 6)
 		yFlip := bits.Test(attrs, 7)
 
-		tileIdx := p.bus.readOam(uint8(oamAddr) + 1)
-		ptBaseAddr := p.getSpritePatternTableAddr() + (uint16(tileIdx) * 16)
+		y := p.scanline - spriteY
+		if yFlip {
+			y = spriteHeight - y - 1
+		}
 
-		for ptAddr := ptBaseAddr; ptAddr < ptBaseAddr+8; ptAddr++ {
-			if spriteY >= NES_HEIGHT {
+		tileIdx := p.bus.readOam(uint8(oamAddr) + 1)
+		ptAddr := p.getSpritePatternTableAddr() + (uint16(tileIdx) * 16) + uint16(y%8)
+		ptByte1 := p.bus.read(ptAddr)
+		ptByte2 := p.bus.read(ptAddr + 8)
+
+		diff := (8 - (spriteX % 8))
+		for x := spriteX; x < spriteX+8; x++ {
+			if x >= NES_WIDTH {
 				break
 			}
 
-			y := spriteY
-			if yFlip {
-				y = 8 - spriteY - 1
+			pixel := 7 - ((x + diff) % 8)
+			if xFlip {
+				pixel = 7 - pixel
+			}
+			colorBit0 := (ptByte1 >> pixel) & 1
+			colorBit1 := (ptByte2 >> pixel) & 1
+			colorNum := (colorBit1 << 1) | colorBit0
+
+			if colorNum == 0 || (bgPriority && p.bgPixels[x][p.scanline] != 0) {
+				continue
 			}
 
-			ptByte1 := p.bus.read(ptAddr)
-			ptByte2 := p.bus.read(ptAddr + 8)
-			diff := (8 - (spriteX % 8))
-
-			for x := spriteX; x < spriteX+8; x++ {
-				if x >= NES_WIDTH {
-					break
-				}
-
-				pixel := 7 - ((x + diff) % 8)
-				if xFlip {
-					pixel = 7 - pixel
-				}
-				colorBit0 := (ptByte1 >> pixel) & 1
-				colorBit1 := (ptByte2 >> pixel) & 1
-				colorNum := (colorBit1 << 1) | colorBit0
-
-				if colorNum == 0 || (bgPriority && p.bgPixels[x][spriteY] != 0) {
-					continue
-				}
-
-				color := p.getPalette(int(paletteNum))[colorNum]
-				p.screen.drawPixel(int32(x), int32(y), color)
-			}
-			spriteY++
+			color := p.getPalette(int(paletteNum))[colorNum]
+			p.screen.drawPixel(int32(x), int32(p.scanline), color)
 		}
 	}
 }
@@ -187,7 +187,7 @@ func (p *PPU) showCHR() {
 			p.screen.drawPixel(int32(x)+NES_WIDTH, int32(y), COLORS[colorNum*3])
 		}
 	}
-	p.screen.Update()
+	p.screen.update()
 }
 
 func (p *PPU) readRegister(addr uint16) uint8 {
@@ -257,6 +257,7 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 			p.bus.writeOam(p.oamAddr, p.cpu.read(cpuAddr+i))
 			p.oamAddr++
 		}
+		p.cpu.stallForDma()
 	}
 }
 
@@ -294,4 +295,12 @@ func (p *PPU) getPalette(num int) [4]uint32 {
 		palette[i-addr] = COLORS[paletteByte]
 	}
 	return palette
+}
+
+func (p *PPU) setZeroHit() {
+	p.ppuStatus = bits.Set(p.ppuStatus, 6)
+}
+
+func (p *PPU) resetZeroHit() {
+	p.ppuStatus = bits.Reset(p.ppuStatus, 6)
 }

@@ -62,7 +62,7 @@ func (nes *NES) update() {
 			nes.ppu.update()
 		}
 	}
-	nes.ppu.screen.Update()
+	nes.ppu.screen.update()
 	nes.controllers.update()
 	nes.cyc -= CPS
 }
