@@ -36,12 +36,12 @@ func NewScreen(width, height, scale int) *Screen {
 	return &s
 }
 
-func (s *Screen) Destroy() {
+func (s *Screen) destroy() {
 	s.win.Destroy()
 	sdl.Quit()
 }
 
-func (s *Screen) Update() {
+func (s *Screen) update() {
 	s.win.UpdateSurface()
 }
 

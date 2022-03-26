@@ -50,14 +50,14 @@ var instructionNames = [256]string{
 }
 
 type CPU struct {
-	cyc        int
-	a, x, y, s uint8
-	pc         uint16
-	p          *Status
-	instr      Instruction
-	bus        *CpuBus
-	interrupt  Interrupt
-	debug      bool
+	totalCyc, cyc, stall int
+	a, x, y, s           uint8
+	pc                   uint16
+	p                    *Status
+	instr                Instruction
+	bus                  *CpuBus
+	interrupt            Interrupt
+	debug                bool
 }
 
 func NewCPU(bus *CpuBus, debug bool) *CPU {
@@ -72,6 +72,10 @@ func NewCPU(bus *CpuBus, debug bool) *CPU {
 }
 
 func (c *CPU) update() int {
+	if c.stall > 0 {
+		c.stall--
+		return 1
+	}
 	c.print()
 	c.cyc = 0
 	c.checkInterrupts()
@@ -80,6 +84,7 @@ func (c *CPU) update() int {
 	operand := c.getOperand(c.instr.addrMode)
 	c.instr.function(c, operand)
 	c.cyc += c.instr.cyc
+	c.totalCyc += c.cyc
 	return c.cyc
 }
 
@@ -226,6 +231,10 @@ func (c *CPU) pop16() uint16 {
 	lo := uint16(c.pop8())
 	hi := uint16(c.pop8())
 	return (hi << 8) | lo
+}
+
+func (c *CPU) stallForDma() {
+	c.stall = 513 + (c.totalCyc % 2)
 }
 
 func (c *CPU) triggerInterrupt(i Interrupt) {
