@@ -9,14 +9,13 @@ import (
 // - 8x16 sprites
 // - Scrolling
 // - NameTable mirroring
-// - CPU stalling after DMA
 
 const (
 	NES_WIDTH  = 256
 	NES_HEIGHT = 240
 	CHR_WIDTH  = 128
 	CHR_HEIGHT = 256
-	SCALE      = 3
+	SCALE      = 2
 	PPUCTRL    = 0x2000
 	PPUMASK    = 0x2001
 	PPUSTATUS  = 0x2002
@@ -42,14 +41,14 @@ var (
 )
 
 type PPU struct {
-	cpu                                                         *CPU
-	bus                                                         *PpuBus
-	screen                                                      *Screen
-	bgPixels                                                    [NES_WIDTH][NES_HEIGHT]uint8
-	scanline, cyc                                               int
-	addr                                                        uint16
-	ppuCtrl, ppuMask, ppuStatus, oamAddr, ppuScroll, dataBuffer uint8
-	nmiOccurred, nmiOutput, ppuAddrLoaded                       bool
+	cpu                                                 *CPU
+	bus                                                 *PpuBus
+	screen                                              *Screen
+	bgPixels                                            [NES_WIDTH][NES_HEIGHT]uint8
+	scanline, cyc, scrollX, scrollY                     int
+	addr                                                uint16
+	ppuCtrl, ppuMask, ppuStatus, oamAddr, dataBuffer    uint8
+	nmiOccurred, nmiOutput, ppuAddrLoaded, scrollLoaded bool
 }
 
 func NewPPU(b *PpuBus) *PPU {
@@ -73,42 +72,53 @@ func (p *PPU) update() {
 		}
 	} else if p.scanline == 241 && p.cyc == 1 {
 		p.setVblank()
+		p.nmiOccurred = true
 		if p.nmiOutput && p.nmiOccurred {
 			p.cpu.triggerInterrupt(Nmi)
 		}
 	} else if p.scanline == 261 && p.cyc == 1 {
 		p.resetVblank()
-		p.scanline = 0
-		p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
 		p.resetZeroHit()
+		p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
+		p.ppuCtrl &= 0xFC
+		p.scanline = -1
+		p.scrollX = 0
+		p.scrollY = 0
+		p.nmiOccurred = false
+		p.screen.update()
 	}
 }
 
 func (p *PPU) renderBackground() {
-	ntBaseAddr := p.getNameTableAddr()
-
 	for x := 0; x < NES_WIDTH; x++ {
-		ntX := x / 8
+		scrolledX := (x + p.scrollX) % 256
+
+		ntX := (x + p.scrollX) / 8
 		ntY := p.scanline / 8
-		ntAddr := uint16((ntY*32)+ntX) + uint16(ntBaseAddr)
+		ntBaseAddr := p.getNameTableAddr()
+		ntAddr := uint16((ntY*32)+ntX) + ntBaseAddr
+		if ntX > 31 {
+			ntAddr = (ntAddr ^ 0x400) - 0x20
+			ntBaseAddr ^= 0x400
+		}
 
 		ptIdx := p.bus.read(ntAddr)
 		ptAddr := p.getBgPatternTableAddr() + (uint16(ptIdx) * 16) + uint16(p.scanline%8)
 		ptByte1 := p.bus.read(ptAddr)
 		ptByte2 := p.bus.read(ptAddr + 8)
 
-		pixel := 7 - (x % 8)
+		pixel := 7 - (scrolledX % 8)
 		colorBit0 := (ptByte1 >> pixel) & 1
 		colorBit1 := (ptByte2 >> pixel) & 1
 		colorNum := (colorBit1 << 1) | colorBit0
 		p.bgPixels[x][p.scanline] = colorNum
 
-		blockX := x / 32
+		blockX := scrolledX / 32
 		blockY := p.scanline / 32
 		blockAddr := uint16(8*blockY) + uint16(blockX) + ntBaseAddr + 0x3C0
 		blockByte := p.bus.read(blockAddr)
 
-		quadX := x / 16
+		quadX := scrolledX / 16
 		quadY := p.scanline / 16
 		quad := uint8(((quadY % 2) << 1) | (quadX % 2))
 
@@ -237,7 +247,12 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 		p.oamAddr++
 
 	case PPUSCROLL:
-		p.ppuScroll = val
+		if !p.scrollLoaded {
+			p.scrollX = int(val)
+		} else {
+			p.scrollY = int(val)
+		}
+		p.scrollLoaded = !p.scrollLoaded
 
 	case PPUADDR:
 		if p.ppuAddrLoaded {
@@ -279,12 +294,10 @@ func (p *PPU) getAddrIncrement() uint16 {
 
 func (p *PPU) setVblank() {
 	p.ppuStatus = bits.Set(p.ppuStatus, 7)
-	p.nmiOccurred = true
 }
 
 func (p *PPU) resetVblank() {
 	p.ppuStatus = bits.Reset(p.ppuStatus, 7)
-	p.nmiOccurred = false
 }
 
 func (p *PPU) getPalette(num int) [4]uint32 {
