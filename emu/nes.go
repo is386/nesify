@@ -39,7 +39,7 @@ func (nes *NES) Run() {
 
 	for range ticker.C {
 		if !nes.running {
-			nes.shutdown()
+			return
 		}
 		nes.update()
 	}
@@ -62,10 +62,6 @@ func (nes *NES) update() {
 			nes.ppu.update()
 		}
 	}
-	nes.controllers.update()
+	nes.running = nes.controllers.update()
 	nes.cyc -= CPS
-}
-
-func (nes *NES) shutdown() {
-	nes.running = false
 }

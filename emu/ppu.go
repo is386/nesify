@@ -7,8 +7,8 @@ import (
 // TODO:
 // - Sprite overlap priority
 // - 8x16 sprites
-// - Scrolling
 // - NameTable mirroring
+// - Register Sharing
 
 const (
 	NES_WIDTH  = 256
@@ -41,14 +41,14 @@ var (
 )
 
 type PPU struct {
-	cpu                                                 *CPU
-	bus                                                 *PpuBus
-	screen                                              *Screen
-	bgPixels                                            [NES_WIDTH][NES_HEIGHT]uint8
-	scanline, cyc, scrollX, scrollY                     int
-	addr                                                uint16
-	ppuCtrl, ppuMask, ppuStatus, oamAddr, dataBuffer    uint8
-	nmiOccurred, nmiOutput, ppuAddrLoaded, scrollLoaded bool
+	cpu                                              *CPU
+	bus                                              *PpuBus
+	screen                                           *Screen
+	bgPixels                                         [NES_WIDTH][NES_HEIGHT]uint8
+	scanline, cyc, scrollX, scrollY                  int
+	addr                                             uint16
+	ppuCtrl, ppuMask, ppuStatus, oamAddr, dataBuffer uint8
+	nmiOccurred, nmiOutput, isSecondWrite            bool
 }
 
 func NewPPU(b *PpuBus) *PPU {
@@ -71,39 +71,33 @@ func (p *PPU) update() {
 			p.renderSprites()
 		}
 	} else if p.scanline == 241 && p.cyc == 1 {
-		p.setVblank()
-		p.nmiOccurred = true
-		if p.nmiOutput && p.nmiOccurred {
-			p.cpu.triggerInterrupt(Nmi)
-		}
+		p.enterVblank()
 	} else if p.scanline == 261 && p.cyc == 1 {
-		p.resetVblank()
-		p.resetZeroHit()
-		p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
-		p.ppuCtrl &= 0xFC
-		p.scanline = -1
-		p.scrollX = 0
-		p.scrollY = 0
-		p.nmiOccurred = false
-		p.screen.update()
+		p.exitVblank()
 	}
 }
 
 func (p *PPU) renderBackground() {
 	for x := 0; x < NES_WIDTH; x++ {
 		scrolledX := (x + p.scrollX) % 256
+		scrolledY := (p.scanline + p.scrollY) % 240
 
 		ntX := (x + p.scrollX) / 8
-		ntY := p.scanline / 8
+		ntY := (p.scanline + p.scrollY) / 8
 		ntBaseAddr := p.getNameTableAddr()
 		ntAddr := uint16((ntY*32)+ntX) + ntBaseAddr
+
+		if ntY > 29 {
+			ntAddr = ((ntAddr + 0x40) ^ 0x800) ^ 0x400
+			ntBaseAddr ^= 0x800
+		}
 		if ntX > 31 {
 			ntAddr = (ntAddr ^ 0x400) - 0x20
 			ntBaseAddr ^= 0x400
 		}
 
 		ptIdx := p.bus.read(ntAddr)
-		ptAddr := p.getBgPatternTableAddr() + (uint16(ptIdx) * 16) + uint16(p.scanline%8)
+		ptAddr := p.getBgPatternTableAddr() + (uint16(ptIdx) * 16) + uint16(scrolledY%8)
 		ptByte1 := p.bus.read(ptAddr)
 		ptByte2 := p.bus.read(ptAddr + 8)
 
@@ -114,12 +108,12 @@ func (p *PPU) renderBackground() {
 		p.bgPixels[x][p.scanline] = colorNum
 
 		blockX := scrolledX / 32
-		blockY := p.scanline / 32
+		blockY := scrolledY / 32
 		blockAddr := uint16(8*blockY) + uint16(blockX) + ntBaseAddr + 0x3C0
 		blockByte := p.bus.read(blockAddr)
 
 		quadX := scrolledX / 16
-		quadY := p.scanline / 16
+		quadY := scrolledY / 16
 		quad := uint8(((quadY % 2) << 1) | (quadX % 2))
 
 		paletteBit0 := bits.Value(blockByte, (quad * 2))
@@ -247,20 +241,20 @@ func (p *PPU) writeRegister(addr uint16, val uint8) {
 		p.oamAddr++
 
 	case PPUSCROLL:
-		if !p.scrollLoaded {
-			p.scrollX = int(val)
-		} else {
+		if p.isSecondWrite {
 			p.scrollY = int(val)
+		} else {
+			p.scrollX = int(val)
 		}
-		p.scrollLoaded = !p.scrollLoaded
+		p.isSecondWrite = !p.isSecondWrite
 
 	case PPUADDR:
-		if p.ppuAddrLoaded {
+		if p.isSecondWrite {
 			p.addr = (p.addr << 8) | uint16(val)
 		} else {
 			p.addr = uint16(val)
 		}
-		p.ppuAddrLoaded = !p.ppuAddrLoaded
+		p.isSecondWrite = !p.isSecondWrite
 
 	case PPUDATA:
 		p.bus.write(p.addr, val)
@@ -292,12 +286,21 @@ func (p *PPU) getAddrIncrement() uint16 {
 	return uint16(bits.Value(p.ppuCtrl, 2)*31) + 1
 }
 
-func (p *PPU) setVblank() {
+func (p *PPU) enterVblank() {
 	p.ppuStatus = bits.Set(p.ppuStatus, 7)
+	p.nmiOccurred = true
+	if p.nmiOutput && p.nmiOccurred {
+		p.cpu.triggerInterrupt(Nmi)
+	}
 }
 
-func (p *PPU) resetVblank() {
+func (p *PPU) exitVblank() {
 	p.ppuStatus = bits.Reset(p.ppuStatus, 7)
+	p.resetZeroHit()
+	p.bgPixels = [NES_WIDTH][NES_HEIGHT]uint8{}
+	p.scanline = 0
+	p.nmiOccurred = false
+	p.screen.update()
 }
 
 func (p *PPU) getPalette(num int) [4]uint32 {
