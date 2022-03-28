@@ -1,8 +1,6 @@
 package emu
 
 import (
-	"os"
-
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -41,11 +39,11 @@ func NewControllers() *Controllers {
 	return &Controllers{}
 }
 
-func (c *Controllers) update() {
+func (c *Controllers) update() bool {
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		switch e := event.(type) {
 		case *sdl.QuitEvent:
-			os.Exit(0)
+			return false
 		case *sdl.KeyboardEvent:
 			switch e.Type {
 			case sdl.KEYDOWN:
@@ -55,14 +53,19 @@ func (c *Controllers) update() {
 			}
 		}
 	}
+	return true
 }
 
 func (c *Controllers) keyDown(key sdl.Keycode) {
-	c.buttons[buttonMap[key]] = 1
+	if val, ok := buttonMap[key]; ok {
+		c.buttons[val] = 1
+	}
 }
 
 func (c *Controllers) keyUp(key sdl.Keycode) {
-	c.buttons[buttonMap[key]] = 0
+	if val, ok := buttonMap[key]; ok {
+		c.buttons[val] = 0
+	}
 }
 
 func (c *Controllers) readController1() uint8 {
