@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/akamensky/argparse"
-	"github.com/is386/NESify/emu"
+	"github.com/1nderr/nesify/emu"
 	"github.com/sqweek/dialog"
 )
 

@@ -1,7 +1,7 @@
 package emu
 
 import (
-	"github.com/is386/NESify/emu/bits"
+	"github.com/1nderr/nesify/emu/bits"
 )
 
 // TODO:

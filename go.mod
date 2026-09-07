@@ -1,4 +1,4 @@
-module github.com/is386/NESify
+module github.com/1nderr/nesify
 
 go 1.17
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/is386/NESify/emu/bits"
+	"github.com/1nderr/nesify/emu/bits"
 )
 
 type Interrupt int

@@ -1,6 +1,6 @@
 package emu
 
-import "github.com/is386/NESify/emu/bits"
+import "github.com/1nderr/nesify/emu/bits"
 
 type Status struct {
 	n, v, bit5, b, d, i, z, c uint8
